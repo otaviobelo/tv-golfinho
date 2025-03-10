@@ -9,7 +9,7 @@
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; }
         header { background: black; color: white; text-align: center; padding: 10px; font-size: 24px; width: 100%; }
-        .player-container { text-align: center; margin-top: 20px; position: relative; }
+        .player-container { text-align: center; margin-top: 20px; }
         .channel-section { width: 100%; text-align: center; margin-bottom: 20px; }
         .channel-container { display: flex; flex-wrap: wrap; justify-content: center; gap: 15px; padding: 10px; }
         .channel { display: flex; flex-direction: column; align-items: center; cursor: pointer; }
@@ -22,8 +22,6 @@
         .video-popup-container { display: flex; align-items: center; gap: 10px; }
         .video-popup { width: 320px; height: 180px; }
         .popup-logo { width: 50px; height: 50px; border-radius: 10px; cursor: pointer; }
-        .logo-container { position: absolute; top: 10px; right: -80px; }
-        .logo-container img { width: 80px; height: 80px; border-radius: 10px; }
     </style>
 </head>
 <body>
@@ -36,7 +34,6 @@
         <video id="videoPlayer" class="video-js vjs-default-skin" width="640" height="360" controls muted autoplay>
             <source id="videoSource" src="" type="application/x-mpegURL">
         </video>
-        <div class="logo-container" id="channelLogo"></div>
     </div>
     <div class="separator"></div>
     <div id="map"></div>
@@ -48,9 +45,11 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         let player;
+        
         async function loadPlaylist() {
             const response = await fetch("https://raw.githubusercontent.com/otaviobelo/lista99/refs/heads/main/pacote-02.m3u");
             const text = await response.text();
+            
             const channels = [];
             const lines = text.split("\n");
             
@@ -75,33 +74,27 @@
             }
             
             if (channels.length > 0) {
-                initializePlayer(channels[0]);
+                initializePlayer(channels[0].streamUrl);
                 loadChannels(channels);
             }
             
             initMap(channels);
         }
         
-        function initializePlayer(channel) {
+        function initializePlayer(url) {
             player = videojs("videoPlayer", {
                 autoplay: true,
                 muted: true,
                 controls: true,
-                sources: [{ src: channel.streamUrl, type: "application/x-mpegURL" }]
+                sources: [{ src: url, type: "application/x-mpegURL" }]
             });
-            updateChannelLogo(channel.logo);
         }
         
-        function changeStream(channel) {
+        function changeStream(url) {
             if (player) {
-                player.src({ src: channel.streamUrl, type: "application/x-mpegURL" });
+                player.src({ src: url, type: "application/x-mpegURL" });
                 player.play();
-                updateChannelLogo(channel.logo);
             }
-        }
-        
-        function updateChannelLogo(logoUrl) {
-            document.getElementById("channelLogo").innerHTML = `<img src="${logoUrl}" alt="Canal Atual">`;
         }
         
         function loadChannels(channels) {
@@ -111,7 +104,7 @@
                 if (channel.logo) {
                     const channelDiv = document.createElement("div");
                     channelDiv.classList.add("channel");
-                    channelDiv.addEventListener("click", () => changeStream(channel));
+                    channelDiv.addEventListener("click", () => changeStream(channel.streamUrl));
                     
                     const img = document.createElement("img");
                     img.src = channel.logo;
@@ -136,27 +129,17 @@
             channels.forEach(channel => {
                 const marker = L.marker([channel.lat, channel.lon]).addTo(map);
                 
-                // Correção aqui: Usar uma função de vinculação adequada para o evento de clique
-                marker.bindPopup(`
-                    <div class="video-popup-container">
-                        <img src="${channel.logo}" class="popup-logo" alt="${channel.name}">
-                        <div>
-                            <strong>${channel.name}</strong>
-                            <br>
-                            <button onclick="changeStreamFromPopup('${channel.streamUrl}', '${channel.logo}')">Assistir</button>
-                        </div>
-                    </div>
-                `);
+                marker.on("click", () => {
+                    const popupContent = `<div class='video-popup-container'>
+                                            <img src='${channel.logo}' class='popup-logo' alt='${channel.name}' onclick='changeStream("${channel.streamUrl}")'>
+                                            <video class='video-js video-popup' controls autoplay muted>
+                                                <source src='${channel.streamUrl}' type='application/x-mpegURL'>
+                                            </video>
+                                         </div>`;
+                    marker.bindPopup(popupContent).openPopup();
+                    videojs(document.querySelector('.video-popup'));
+                });
             });
-        }
-        
-        // Nova função para mudar o stream a partir do popup
-        function changeStreamFromPopup(streamUrl, logoUrl) {
-            if (player) {
-                player.src({ src: streamUrl, type: "application/x-mpegURL" });
-                player.play();
-                updateChannelLogo(logoUrl);
-            }
         }
         
         loadPlaylist();

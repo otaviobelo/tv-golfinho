@@ -290,7 +290,7 @@
                 if (!player) {
                     player = videojs("videoPlayer", {
                         autoplay: true,
-                        muted: false,  // Corrigido: Não iniciar mudo
+                        muted: true,  // Iniciar mudo
                         controls: true,
                         fluid: true,
                         playsinline: true,
@@ -303,7 +303,7 @@
                     // Atualizar a fonte e iniciar a reprodução
                     player.src({ src: channel.streamUrl, type: "application/x-mpegURL" });
                     player.play();
-                    player.muted(false);  // Garantir que o áudio está ativado
+                    player.muted(true);  // Garantir que o áudio está mudo
                 }
             }
         }
@@ -358,7 +358,7 @@
                 videoId: videoId,
                 playerVars: {
                     'autoplay': 1,
-                    'mute': 0,  // Corrigido: Não iniciar mudo (0 = não mudo)
+                    'mute': 0,  // Iniciar com som
                     'controls': 1,
                     'playsinline': 1,
                     'rel': 0
@@ -651,7 +651,7 @@
                 videoId: channel.youtubeId,
                 playerVars: {
                     'autoplay': 1,
-                    'mute': 1,  // Iniciar mudo para não atrapalhar o player principal
+                    'mute': 0,  // Iniciar com som
                     'controls': 1,
                     'playsinline': 1,
                     'rel': 0,

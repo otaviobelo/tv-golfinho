@@ -7,7 +7,113 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.3.0/video-js.min.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <style>
-        /* Estilos CSS permanecem os mesmos */
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; }
+        header { background: black; color: white; text-align: center; padding: 10px; font-size: 24px; width: 100%; }
+        .player-container { 
+            text-align: center; 
+            margin-top: 20px; 
+            position: relative; 
+            width: 100%; 
+            max-width: 640px;
+        }
+        .channel-section { width: 100%; text-align: center; margin-bottom: 20px; }
+        .channel-container { display: flex; flex-wrap: wrap; justify-content: center; gap: 15px; padding: 10px; }
+        .channel { display: flex; flex-direction: column; align-items: center; cursor: pointer; }
+        .channel img { width: 80px; height: 80px; border: 2px solid transparent; border-radius: 10px; transition: border-color 0.3s; }
+        .channel img:hover { border-color: orange; }
+        .channel-name { margin-top: 5px; font-size: 14px; color: black; }
+        .separator { background: orange; height: 10px; margin: 20px 0; width: 100%; }
+        #map { height: 400px; width: 100%; }
+        .content-below-map { padding: 20px; text-align: center; }
+        .video-popup-container { display: flex; align-items: center; gap: 10px; }
+        .popup-logo { width: 50px; height: 50px; border-radius: 10px; cursor: pointer; }
+        .logo-container { position: absolute; top: 10px; right: -80px; display: none; }
+        .logo-container img { width: 80px; height: 80px; border-radius: 10px; }
+        
+        /* Estilos para o player principal */
+        .video-js {
+            width: 100% !important;
+            height: auto !important;
+            aspect-ratio: 16/9;
+        }
+        
+        /* Estilos para o player dentro do popup */
+        .map-player-container { display: flex; align-items: center; gap: 10px; width: 320px; }
+        .map-video-player { width: 240px; height: 135px; }
+        .channel-info { display: flex; flex-direction: column; align-items: center; }
+        .leaflet-popup-content { width: 320px !important; margin: 5px; }
+        
+        /* Informação de atalhos de teclado */
+        .keyboard-shortcuts { 
+            position: absolute; 
+            top: 10px; 
+            left: 10px; 
+            background-color: rgba(0,0,0,0.6); 
+            color: white; 
+            padding: 8px 12px; 
+            border-radius: 5px; 
+            font-size: 14px;
+        }
+        
+        /* Container para o player do YouTube */
+        .youtube-container {
+            width: 100%;
+            height: 0;
+            padding-bottom: 56.25%; /* Proporção 16:9 */
+            position: relative;
+            display: none;
+        }
+        
+        .youtube-container iframe {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* Container para o player do YouTube no mapa */
+        .map-youtube-player {
+            width: 240px;
+            height: 135px;
+            position: relative;
+        }
+        
+        /* Responsividade para mobile */
+        @media (max-width: 768px) {
+            .player-container {
+                margin: 10px auto;
+                width: 95%;
+            }
+            
+            .keyboard-shortcuts {
+                font-size: 12px;
+                padding: 5px 8px;
+            }
+            
+            .channel img {
+                width: 60px;
+                height: 60px;
+            }
+            
+            #map {
+                height: 300px;
+            }
+        }
+
+        /* Estilos para o botão de tela cheia personalizado */
+        .custom-fullscreen-button {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background-color: rgba(0,0,0,0.6);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 5px 10px;
+            cursor: pointer;
+            z-index: 100;
+        }
     </style>
 </head>
 <body>
@@ -35,7 +141,563 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/video.js/8.3.0/video.min.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // Código JavaScript permanece o mesmo, exceto pelas alterações mencionadas acima
+        let player;
+        let mapPlayerInstance = null;
+        let mapYoutubePlayer = null;
+        let allChannels = [];
+        let currentChannelIndex = 0;
+        let youtubePlayer = null;
+        let youtubeApiLoaded = false;
+        
+        async function loadPlaylist() {
+            const response = await fetch("https://raw.githubusercontent.com/otaviobelo/lista99/refs/heads/main/pacote-02.m3u");
+            const text = await response.text();
+            const channels = [];
+            const lines = text.split("\n");
+            
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].startsWith("#EXTINF")) {
+                    const nameMatch = lines[i].match(/tvg-name="(.*?)"/);
+                    const logoMatch = lines[i].match(/tvg-logo="(.*?)"/);
+                    const latMatch = lines[i].match(/tvg-latitude="(.*?)"/);
+                    const lonMatch = lines[i].match(/tvg-longitude="(.*?)"/);
+                    const streamUrl = lines[i + 1]?.trim();
+                    
+                    if (nameMatch && logoMatch && latMatch && lonMatch && streamUrl) {
+                        // Verificar se é uma URL do YouTube
+                        const isYoutube = isYoutubeUrl(streamUrl);
+                        
+                        channels.push({
+                            name: nameMatch[1],
+                            logo: logoMatch[1],
+                            lat: parseFloat(latMatch[1]),
+                            lon: parseFloat(lonMatch[1]),
+                            streamUrl: streamUrl,
+                            isYoutube: isYoutube,
+                            youtubeId: isYoutube ? extractYoutubeId(streamUrl) : null
+                        });
+                    }
+                }
+            }
+            
+            if (channels.length > 0) {
+                allChannels = channels;
+                currentChannelIndex = 0;
+                initializePlayer(channels[0]);
+                loadChannels(channels);
+                setupKeyboardNavigation();
+            }
+            
+            // Carregar API do YouTube antecipadamente
+            loadYoutubeAPI();
+            
+            initMap(channels);
+        }
+        
+        function isYoutubeUrl(url) {
+            return url.includes('youtube.com') || url.includes('youtu.be');
+        }
+        
+        function extractYoutubeId(url) {
+            let id = null;
+            
+            // Formato youtu.be/XXXXXXXXXXX
+            if (url.includes('youtu.be/')) {
+                id = url.split('youtu.be/')[1];
+                if (id.includes('?')) {
+                    id = id.split('?')[0];
+                }
+            } 
+            // Formato youtube.com/watch?v=XXXXXXXXXXX
+            else if (url.includes('youtube.com/watch')) {
+                const urlParams = new URLSearchParams(url.split('?')[1]);
+                id = urlParams.get('v');
+            }
+            // Formato youtube.com/embed/XXXXXXXXXXX
+            else if (url.includes('youtube.com/embed/')) {
+                id = url.split('youtube.com/embed/')[1];
+                if (id.includes('?')) {
+                    id = id.split('?')[0];
+                }
+            }
+            // Formato youtube.com/live/XXXXXXXXXXX
+            else if (url.includes('youtube.com/live/')) {
+                id = url.split('youtube.com/live/')[1];
+                if (id.includes('?')) {
+                    id = id.split('?')[0];
+                }
+            }
+            
+            return id;
+        }
+        
+        function loadYoutubeAPI() {
+            // Carregar a API do YouTube se não estiver carregada
+            if (!window.YT) {
+                const tag = document.createElement('script');
+                tag.src = "https://www.youtube.com/iframe_api";
+                const firstScriptTag = document.getElementsByTagName('script')[0];
+                firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+                
+                // Definir o callback para quando a API estiver carregada
+                window.onYouTubeIframeAPIReady = function() {
+                    youtubeApiLoaded = true;
+                    console.log("API do YouTube carregada");
+                };
+            } else {
+                youtubeApiLoaded = true;
+            }
+        }
+        
+        function initializePlayer(channel) {
+            if (channel.isYoutube) {
+                // Carregar API do YouTube
+                loadYoutubeAPI();
+                
+                // Esconder o player de vídeo normal e mostrar o contêiner do YouTube
+                document.getElementById('videoPlayer').style.display = 'none';
+                const youtubeContainer = document.getElementById('youtubeContainer');
+                youtubeContainer.style.display = 'block';
+                
+                // Inicializar ou carregar novo vídeo no player do YouTube
+                if (youtubeApiLoaded) {
+                    initYoutubePlayer(channel.youtubeId);
+                } else {
+                    // Se a API ainda não foi carregada, aguardar e inicializar quando estiver pronta
+                    window.onYouTubeIframeAPIReady = function() {
+                        youtubeApiLoaded = true;
+                        initYoutubePlayer(channel.youtubeId);
+                    };
+                }
+                
+                // Se o player do Video.js existir, pausá-lo
+                if (player) {
+                    player.pause();
+                }
+            } else {
+                // Para streams normais, usar o Video.js
+                // Esconder o contêiner do YouTube e mostrar o player de vídeo
+                document.getElementById('youtubeContainer').style.display = 'none';
+                document.getElementById('videoPlayer').style.display = 'block';
+                
+                // Destruir o player do YouTube se existir
+                if (youtubePlayer) {
+                    youtubePlayer.destroy();
+                    youtubePlayer = null;
+                }
+                
+                // Inicializar o player do Video.js
+                if (!player) {
+                    player = videojs("videoPlayer", {
+                        autoplay: true,
+                        muted: false,  // Corrigido: Não iniciar mudo
+                        controls: true,
+                        fluid: true,
+                        playsinline: true,
+                        sources: [{ src: channel.streamUrl, type: "application/x-mpegURL" }]
+                    });
+                    
+                    // Corrigir o problema da tela cheia
+                    fixFullscreenIssue();
+                } else {
+                    // Atualizar a fonte e iniciar a reprodução
+                    player.src({ src: channel.streamUrl, type: "application/x-mpegURL" });
+                    player.play();
+                    player.muted(false);  // Garantir que o áudio está ativado
+                }
+            }
+        }
+        
+        function fixFullscreenIssue() {
+            // Verificar se o navegador suporta a API Fullscreen
+            const doc = window.document;
+            const docEl = doc.documentElement;
+            
+            const requestFullScreen = docEl.requestFullscreen || docEl.mozRequestFullScreen || docEl.webkitRequestFullScreen || docEl.msRequestFullscreen;
+            const cancelFullScreen = doc.exitFullscreen || doc.mozCancelFullScreen || doc.webkitExitFullscreen || doc.msExitFullscreen;
+            
+            if (!requestFullScreen || !cancelFullScreen) {
+                console.log("Navegador não suporta API Fullscreen completa");
+                return;
+            }
+            
+            // Adicionar um event listener específico para o botão de tela cheia do Video.js
+            player.on('fullscreenchange', function() {
+                // Esta função é chamada quando o estado de tela cheia muda
+                console.log("Estado de tela cheia alterado:", player.isFullscreen());
+            });
+            
+            // Verificar se estamos em um dispositivo iOS para tratar especificamente
+            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+            if (isIOS) {
+                // Em iOS, o Video.js pode ter problemas com tela cheia nativa
+                // Adicionar um botão personalizado de tela cheia se necessário
+                const playerContainer = document.querySelector('.player-container');
+                const fullscreenButton = document.createElement('button');
+                fullscreenButton.className = 'custom-fullscreen-button';
+                fullscreenButton.textContent = 'Tela Cheia';
+                fullscreenButton.addEventListener('click', function() {
+                    const videoElement = document.querySelector('video');
+                    if (videoElement) {
+                        if (videoElement.webkitEnterFullscreen) {
+                            videoElement.webkitEnterFullscreen();
+                        }
+                    }
+                });
+                playerContainer.appendChild(fullscreenButton);
+            }
+        }
+        
+        function initYoutubePlayer(videoId) {
+            // Limpar o contêiner do YouTube
+            const youtubeContainer = document.getElementById('youtubeContainer');
+            youtubeContainer.innerHTML = '<div id="youtubePlayer"></div>';
+            
+            // Criar novo player do YouTube
+            youtubePlayer = new YT.Player('youtubePlayer', {
+                videoId: videoId,
+                playerVars: {
+                    'autoplay': 1,
+                    'mute': 0,  // Corrigido: Não iniciar mudo (0 = não mudo)
+                    'controls': 1,
+                    'playsinline': 1,
+                    'rel': 0
+                },
+                events: {
+                    'onReady': function(event) {
+                        event.target.playVideo();
+                        // Garantir que o áudio esteja ativado
+                        event.target.unMute();
+                        event.target.setVolume(100);
+                    }
+                }
+            });
+        }
+        
+        function changeStream(channel, index = null) {
+            // Atualizar o índice atual se fornecido
+            if (index !== null) {
+                currentChannelIndex = index;
+            } else {
+                // Encontrar o índice deste canal se não for fornecido
+                currentChannelIndex = allChannels.findIndex(c => 
+                    c.streamUrl === channel.streamUrl && c.name === channel.name);
+            }
+            
+            // Inicializar o player apropriado para o tipo de canal
+            initializePlayer(channel);
+            
+            // Destacar o canal selecionado na lista
+            highlightCurrentChannel();
+        }
+        
+        function highlightCurrentChannel() {
+            // Remover destaque de todos os canais
+            const channelElements = document.querySelectorAll('.channel');
+            channelElements.forEach(el => {
+                el.querySelector('img').style.borderColor = 'transparent';
+            });
+            
+            // Adicionar destaque ao canal atual
+            if (channelElements[currentChannelIndex]) {
+                channelElements[currentChannelIndex].querySelector('img').style.borderColor = 'orange';
+            }
+        }
+        
+        function nextChannel() {
+            currentChannelIndex = (currentChannelIndex + 1) % allChannels.length;
+            const channel = allChannels[currentChannelIndex];
+            changeStream(channel, currentChannelIndex);
+        }
+        
+        function previousChannel() {
+            currentChannelIndex = (currentChannelIndex - 1 + allChannels.length) % allChannels.length;
+            const channel = allChannels[currentChannelIndex];
+            changeStream(channel, currentChannelIndex);
+        }
+        
+        function setupKeyboardNavigation() {
+            document.addEventListener('keydown', (event) => {
+                // Compatibilidade com controle remoto da Smart TV LG
+                // Tecla de canal para cima (code 427 ou keyCode 33 em alguns controles)
+                if (event.keyCode === 33 || event.keyCode === 427 || event.key === 'PageUp' || event.key === 'ChannelUp') {
+                    nextChannel();
+                    event.preventDefault();
+                } 
+                // Tecla de canal para baixo (code 428 ou keyCode 34 em alguns controles)
+                else if (event.keyCode === 34 || event.keyCode === 428 || event.key === 'PageDown' || event.key === 'ChannelDown') {
+                    previousChannel();
+                    event.preventDefault();
+                }
+                // Manter compatibilidade com teclado normal usando setas
+                else if (event.key === 'ArrowUp') {
+                    nextChannel();
+                    event.preventDefault();
+                } 
+                else if (event.key === 'ArrowDown') {
+                    previousChannel();
+                    event.preventDefault();
+                }
+                // Tecla F para tela cheia (alternativa para o botão de tela cheia)
+                else if (event.key === 'f' || event.key === 'F') {
+                    if (player && !allChannels[currentChannelIndex].isYoutube) {
+                        if (player.isFullscreen()) {
+                            player.exitFullscreen();
+                        } else {
+                            player.requestFullscreen();
+                        }
+                    }
+                    event.preventDefault();
+                }
+            });
+        }
+        
+        function loadChannels(channels) {
+            const channelContainer = document.getElementById("channelContainer");
+            channelContainer.innerHTML = "";
+            channels.forEach((channel, index) => {
+                if (channel.logo) {
+                    const channelDiv = document.createElement("div");
+                    channelDiv.classList.add("channel");
+                    channelDiv.addEventListener("click", () => changeStream(channel, index));
+                    
+                    const img = document.createElement("img");
+                    img.src = channel.logo;
+                    img.alt = channel.name;
+                    img.title = channel.name;
+                    
+                    const name = document.createElement("div");
+                    name.classList.add("channel-name");
+                    name.textContent = channel.name;
+                    
+                    channelDiv.appendChild(img);
+                    channelDiv.appendChild(name);
+                    channelContainer.appendChild(channelDiv);
+                }
+            });
+            
+            // Destacar o canal inicial
+            highlightCurrentChannel();
+        }
+        
+        function initMap(channels) {
+            const map = L.map("map").setView([-15, -55], 4);
+            L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+            
+            channels.forEach(channel => {
+                // Criar um marcador para cada canal
+                const marker = L.marker([channel.lat, channel.lon]).addTo(map);
+                
+                // Evento ao passar o mouse sobre o marcador
+                marker.on('mouseover', function(e) {
+                    // Criar o conteúdo do popup com o player
+                    const popupContent = createPopupContent(channel);
+                    
+                    // Abrir o popup
+                    marker.bindPopup(popupContent, { 
+                        minWidth: 320,
+                        maxWidth: 320
+                    }).openPopup();
+                    
+                    // Inicializar o player apropriado após o popup estar aberto
+                    setTimeout(() => {
+                        if (channel.isYoutube) {
+                            // Inicializar o player do YouTube no mapa
+                            initializeMapYoutubePlayer(channel);
+                        } else {
+                            // Inicializar o player normal no mapa
+                            initializeMapPlayer(channel);
+                        }
+                    }, 100);
+                });
+            });
+            
+            // Limpar os players quando clicar em qualquer lugar do mapa
+            map.on('click', function() {
+                if (mapPlayerInstance) {
+                    mapPlayerInstance.dispose();
+                    mapPlayerInstance = null;
+                }
+                if (mapYoutubePlayer) {
+                    mapYoutubePlayer.destroy();
+                    mapYoutubePlayer = null;
+                }
+            });
+        }
+        
+        function createPopupContent(channel) {
+            // Criar um container para o popup
+            const container = document.createElement('div');
+            container.className = 'map-player-container';
+            
+            // Encontrar o índice deste canal
+            const channelIndex = allChannels.findIndex(c => 
+                c.streamUrl === channel.streamUrl && c.name === channel.name);
+            
+            // Criar o div de informações do canal (usado em ambos os casos)
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'channel-info';
+            
+            const img = document.createElement('img');
+            img.src = channel.logo;
+            img.className = 'popup-logo';
+            img.alt = channel.name;
+            img.title = 'Clique para ver em tela grande';
+            
+            // Tornar a imagem clicável para mudar o stream
+            img.addEventListener('click', function() {
+                changeStream(channel, channelIndex);
+            });
+            
+            const nameDiv = document.createElement('div');
+            nameDiv.textContent = channel.name + (channel.isYoutube ? ' (YouTube)' : '');
+            nameDiv.style.textAlign = 'center';
+            nameDiv.style.marginTop = '5px';
+            nameDiv.style.fontWeight = 'bold';
+            
+            infoDiv.appendChild(img);
+            infoDiv.appendChild(nameDiv);
+            
+            // Para vídeos do YouTube, criar um contêiner para o player
+            if (channel.isYoutube) {
+                const videoElement = document.createElement('div');
+                videoElement.className = 'map-youtube-player';
+                videoElement.id = 'mapYoutubePlayer';
+                
+                // Adicionar elementos ao container
+                container.appendChild(videoElement);
+                container.appendChild(infoDiv);
+            } else {
+                // Para streams normais, mostrar o player miniatura
+                const videoElement = document.createElement('div');
+                videoElement.className = 'map-video-player';
+                
+                const video = document.createElement('video');
+                video.id = 'mapPlayer';
+                video.className = 'video-js vjs-default-skin';
+                video.controls = true;
+                video.muted = true;  // O player do mapa pode ficar mudo
+                video.preload = 'auto';
+                video.setAttribute('playsinline', ''); // Impede tela cheia em iOS
+                
+                const source = document.createElement('source');
+                source.src = channel.streamUrl;
+                source.type = 'application/x-mpegURL';
+                
+                video.appendChild(source);
+                videoElement.appendChild(video);
+                
+                // Adicionar elementos ao container
+                container.appendChild(videoElement);
+                container.appendChild(infoDiv);
+            }
+            
+            return container;
+        }
+        
+        function initializeMapPlayer(channel) {
+            // Se for um canal do YouTube, não inicializar o player do mapa normal
+            if (channel.isYoutube) {
+                return;
+            }
+            
+            // Descartar o player anterior se existir
+            if (mapPlayerInstance) {
+                mapPlayerInstance.dispose();
+            }
+            
+            // Inicializar o novo player
+            mapPlayerInstance = videojs('mapPlayer', {
+                autoplay: true,
+                muted: true,  // O player do mapa pode ficar mudo
+                controls: true,
+                fluid: false,
+                playsinline: true, // Impede tela cheia em iOS
+                width: 240,
+                height: 135,
+                sources: [{ src: channel.streamUrl, type: 'application/x-mpegURL' }]
+            });
+        }
+        
+        function initializeMapYoutubePlayer(channel) {
+            // Se não for um canal do YouTube, não inicializar o player do YouTube
+            if (!channel.isYoutube || !channel.youtubeId) {
+                return;
+            }
+            
+            // Se a API do YouTube não estiver carregada, aguardar
+            if (!youtubeApiLoaded) {
+                console.log("Aguardando API do YouTube...");
+                const checkInterval = setInterval(function() {
+                    if (youtubeApiLoaded) {
+                        clearInterval(checkInterval);
+                        createMapYoutubePlayer(channel);
+                    }
+                }, 100);
+                return;
+            }
+            
+            createMapYoutubePlayer(channel);
+        }
+        
+        function createMapYoutubePlayer(channel) {
+            // Descartar o player anterior se existir
+            if (mapYoutubePlayer) {
+                mapYoutubePlayer.destroy();
+            }
+            
+            // Criar o player do YouTube para o mapa
+            mapYoutubePlayer = new YT.Player('mapYoutubePlayer', {
+                videoId: channel.youtubeId,
+                playerVars: {
+                    'autoplay': 1,
+                    'mute': 1,  // Iniciar mudo para não atrapalhar o player principal
+                    'controls': 1,
+                    'playsinline': 1,
+                    'rel': 0,
+                    'fs': 0, // Desabilitar botão de tela cheia
+                    'modestbranding': 1 // Reduzir a marca do YouTube
+                },
+                events: {
+                    'onReady': function(event) {
+                        event.target.playVideo();
+                    }
+                }
+            });
+        }
+        
+        // Função para ajudar a detectar problemas com o modo de tela cheia
+        function logFullscreenAPI() {
+            const fullscreenEnabled = document.fullscreenEnabled || 
+                                     document.webkitFullscreenEnabled || 
+                                     document.mozFullScreenEnabled || 
+                                     document.msFullscreenEnabled;
+            
+            console.log("Fullscreen API disponível:", fullscreenEnabled);
+            console.log("Document fullscreenElement:", document.fullscreenElement);
+            console.log("Document webkitFullscreenElement:", document.webkitFullscreenElement);
+            console.log("Document mozFullScreenElement:", document.mozFullScreenElement);
+            console.log("Document msFullscreenElement:", document.msFullscreenElement);
+        }
+        
+        // Prevenir entrada em tela cheia não intencional em dispositivos móveis
+        document.addEventListener('DOMContentLoaded', function() {
+            // Para dispositivos iOS
+            document.addEventListener('touchend', function(e) {
+                const videoElement = document.getElementById('videoPlayer');
+                if (videoElement) {
+                    videoElement.setAttribute('playsinline', '');
+                    if (videoElement._player) {
+                        videoElement._player.options_.playsinline = true;
+                    }
+                }
+            });
+            
+            // Log de debug para a API Fullscreen
+            logFullscreenAPI();
+        });
+        
+        loadPlaylist();
     </script>
 </body>
 </html>

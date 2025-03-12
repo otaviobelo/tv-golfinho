@@ -72,6 +72,13 @@
             height: 100%;
         }
         
+        /* Container para o player do YouTube no mapa */
+        .map-youtube-player {
+            width: 240px;
+            height: 135px;
+            position: relative;
+        }
+        
         /* Responsividade para mobile */
         @media (max-width: 768px) {
             .player-container {
@@ -136,9 +143,11 @@
     <script>
         let player;
         let mapPlayerInstance = null;
+        let mapYoutubePlayer = null;
         let allChannels = [];
         let currentChannelIndex = 0;
         let youtubePlayer = null;
+        let youtubeApiLoaded = false;
         
         async function loadPlaylist() {
             const response = await fetch("https://raw.githubusercontent.com/otaviobelo/lista99/refs/heads/main/pacote-02.m3u");
@@ -178,6 +187,9 @@
                 loadChannels(channels);
                 setupKeyboardNavigation();
             }
+            
+            // Carregar API do YouTube antecipadamente
+            loadYoutubeAPI();
             
             initMap(channels);
         }
@@ -226,6 +238,14 @@
                 tag.src = "https://www.youtube.com/iframe_api";
                 const firstScriptTag = document.getElementsByTagName('script')[0];
                 firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+                
+                // Definir o callback para quando a API estiver carregada
+                window.onYouTubeIframeAPIReady = function() {
+                    youtubeApiLoaded = true;
+                    console.log("API do YouTube carregada");
+                };
+            } else {
+                youtubeApiLoaded = true;
             }
         }
         
@@ -240,11 +260,12 @@
                 youtubeContainer.style.display = 'block';
                 
                 // Inicializar ou carregar novo vídeo no player do YouTube
-                if (window.YT && window.YT.Player) {
+                if (youtubeApiLoaded) {
                     initYoutubePlayer(channel.youtubeId);
                 } else {
                     // Se a API ainda não foi carregada, aguardar e inicializar quando estiver pronta
                     window.onYouTubeIframeAPIReady = function() {
+                        youtubeApiLoaded = true;
                         initYoutubePlayer(channel.youtubeId);
                     };
                 }
@@ -478,20 +499,28 @@
                         maxWidth: 320
                     }).openPopup();
                     
-                    // Inicializar o player do Video.js após o popup estar aberto
+                    // Inicializar o player apropriado após o popup estar aberto
                     setTimeout(() => {
-                        if (!channel.isYoutube) {
+                        if (channel.isYoutube) {
+                            // Inicializar o player do YouTube no mapa
+                            initializeMapYoutubePlayer(channel);
+                        } else {
+                            // Inicializar o player normal no mapa
                             initializeMapPlayer(channel);
                         }
                     }, 100);
                 });
             });
             
-            // Limpar o player do mapa quando clicar em qualquer lugar do mapa
+            // Limpar os players quando clicar em qualquer lugar do mapa
             map.on('click', function() {
                 if (mapPlayerInstance) {
                     mapPlayerInstance.dispose();
                     mapPlayerInstance = null;
+                }
+                if (mapYoutubePlayer) {
+                    mapYoutubePlayer.destroy();
+                    mapYoutubePlayer = null;
                 }
             });
         }
@@ -501,45 +530,42 @@
             const container = document.createElement('div');
             container.className = 'map-player-container';
             
-            // Para vídeos do YouTube, mostrar apenas a miniatura clicável
+            // Encontrar o índice deste canal
+            const channelIndex = allChannels.findIndex(c => 
+                c.streamUrl === channel.streamUrl && c.name === channel.name);
+            
+            // Criar o div de informações do canal (usado em ambos os casos)
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'channel-info';
+            
+            const img = document.createElement('img');
+            img.src = channel.logo;
+            img.className = 'popup-logo';
+            img.alt = channel.name;
+            img.title = 'Clique para ver em tela grande';
+            
+            // Tornar a imagem clicável para mudar o stream
+            img.addEventListener('click', function() {
+                changeStream(channel, channelIndex);
+            });
+            
+            const nameDiv = document.createElement('div');
+            nameDiv.textContent = channel.name + (channel.isYoutube ? ' (YouTube)' : '');
+            nameDiv.style.textAlign = 'center';
+            nameDiv.style.marginTop = '5px';
+            nameDiv.style.fontWeight = 'bold';
+            
+            infoDiv.appendChild(img);
+            infoDiv.appendChild(nameDiv);
+            
+            // Para vídeos do YouTube, criar um contêiner para o player
             if (channel.isYoutube) {
-                const infoDiv = document.createElement('div');
-                infoDiv.className = 'channel-info';
-                infoDiv.style.width = '100%';
+                const videoElement = document.createElement('div');
+                videoElement.className = 'map-youtube-player';
+                videoElement.id = 'mapYoutubePlayer';
                 
-                const img = document.createElement('img');
-                img.src = channel.logo;
-                img.className = 'popup-logo';
-                img.alt = channel.name;
-                img.title = 'Clique para ver em tela grande';
-                img.style.width = '80px';
-                img.style.height = '80px';
-                
-                // Encontrar o índice deste canal
-                const channelIndex = allChannels.findIndex(c => 
-                    c.streamUrl === channel.streamUrl && c.name === channel.name);
-                
-                // Tornar a imagem clicável para mudar o stream
-                img.addEventListener('click', function() {
-                    changeStream(channel, channelIndex);
-                });
-                
-                const nameDiv = document.createElement('div');
-                nameDiv.textContent = channel.name + ' (YouTube)';
-                nameDiv.style.textAlign = 'center';
-                nameDiv.style.marginTop = '5px';
-                nameDiv.style.fontWeight = 'bold';
-                
-                infoDiv.appendChild(img);
-                infoDiv.appendChild(nameDiv);
-                
-                const noteDiv = document.createElement('div');
-                noteDiv.textContent = 'Clique para assistir no player principal';
-                noteDiv.style.fontSize = '12px';
-                noteDiv.style.marginTop = '5px';
-                noteDiv.style.textAlign = 'center';
-                
-                infoDiv.appendChild(noteDiv);
+                // Adicionar elementos ao container
+                container.appendChild(videoElement);
                 container.appendChild(infoDiv);
             } else {
                 // Para streams normais, mostrar o player miniatura
@@ -561,34 +587,6 @@
                 video.appendChild(source);
                 videoElement.appendChild(video);
                 
-                // Adicionar a logo e o nome do canal ao lado
-                const infoDiv = document.createElement('div');
-                infoDiv.className = 'channel-info';
-                
-                const img = document.createElement('img');
-                img.src = channel.logo;
-                img.className = 'popup-logo';
-                img.alt = channel.name;
-                img.title = 'Clique para ver em tela grande';
-                
-                // Encontrar o índice deste canal
-                const channelIndex = allChannels.findIndex(c => 
-                    c.streamUrl === channel.streamUrl && c.name === channel.name);
-                
-                // Tornar a imagem clicável para mudar o stream
-                img.addEventListener('click', function() {
-                    changeStream(channel, channelIndex);
-                });
-                
-                const nameDiv = document.createElement('div');
-                nameDiv.textContent = channel.name;
-                nameDiv.style.textAlign = 'center';
-                nameDiv.style.marginTop = '5px';
-                nameDiv.style.fontWeight = 'bold';
-                
-                infoDiv.appendChild(img);
-                infoDiv.appendChild(nameDiv);
-                
                 // Adicionar elementos ao container
                 container.appendChild(videoElement);
                 container.appendChild(infoDiv);
@@ -598,7 +596,7 @@
         }
         
         function initializeMapPlayer(channel) {
-            // Se for um canal do YouTube, não inicializar o player do mapa
+            // Se for um canal do YouTube, não inicializar o player do mapa normal
             if (channel.isYoutube) {
                 return;
             }
@@ -618,6 +616,53 @@
                 width: 240,
                 height: 135,
                 sources: [{ src: channel.streamUrl, type: 'application/x-mpegURL' }]
+            });
+        }
+        
+        function initializeMapYoutubePlayer(channel) {
+            // Se não for um canal do YouTube, não inicializar o player do YouTube
+            if (!channel.isYoutube || !channel.youtubeId) {
+                return;
+            }
+            
+            // Se a API do YouTube não estiver carregada, aguardar
+            if (!youtubeApiLoaded) {
+                console.log("Aguardando API do YouTube...");
+                const checkInterval = setInterval(function() {
+                    if (youtubeApiLoaded) {
+                        clearInterval(checkInterval);
+                        createMapYoutubePlayer(channel);
+                    }
+                }, 100);
+                return;
+            }
+            
+            createMapYoutubePlayer(channel);
+        }
+        
+        function createMapYoutubePlayer(channel) {
+            // Descartar o player anterior se existir
+            if (mapYoutubePlayer) {
+                mapYoutubePlayer.destroy();
+            }
+            
+            // Criar o player do YouTube para o mapa
+            mapYoutubePlayer = new YT.Player('mapYoutubePlayer', {
+                videoId: channel.youtubeId,
+                playerVars: {
+                    'autoplay': 1,
+                    'mute': 1,  // Iniciar mudo para não atrapalhar o player principal
+                    'controls': 1,
+                    'playsinline': 1,
+                    'rel': 0,
+                    'fs': 0, // Desabilitar botão de tela cheia
+                    'modestbranding': 1 // Reduzir a marca do YouTube
+                },
+                events: {
+                    'onReady': function(event) {
+                        event.target.playVideo();
+                    }
+                }
             });
         }
         
